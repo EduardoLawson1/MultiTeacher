@@ -1,0 +1,62 @@
+# Configuration for supervised training of DPT head on PASCAL VOC
+
+# --- Dataset Configuration ---
+dataset:
+  name: "pascal_voc"
+  root_dir: "/data/VOC" # Update with your PASCAL VOC path
+  train_list: "splits/train.txt"
+  val_list: "splits/val.txt"
+  img_dir: "JPEGImages"
+  mask_dir: "SegmentationClass"
+
+# --- Training Hyperparameters ---
+train:
+  epochs: 60
+  batch_size: 8
+  learning_rate: 0.0001
+  optimizer: "AdamW"
+  weight_decay: 0.01
+  scheduler: "poly" # Polynomial learning rate decay
+  num_workers: 4
+
+# --- Model Configuration ---
+model:
+  encoder_size: "base" # DINOv2 backbone size
+  features: 256
+  out_channels: [256, 512, 1024, 1024] # Should match DPTHead defaults for 'base'
+  use_bn: False
+
+# --- Class Groups for Specialized Training ---
+# The trainer will use one of these groups at a time.
+# The class names must match the 'pascal' list in util/classes.py
+class_groups:
+  vehicles:
+    - aeroplane
+    - bicycle
+    - boat
+    - bus
+    - car
+    - motorbike
+    - train
+  animals:
+    - bird
+    - cat
+    - cow
+    - dog
+    - horse
+    - sheep
+  indoor:
+    - bottle
+    - chair
+    - dining table
+    - potted plant
+    - sofa
+    - tv/monitor
+  person:
+    - person
+
+# --- Experiment Configuration ---
+# This section specifies which group to use for the current training run
+experiment:
+  group_to_train: "vehicles" # Options: vehicles, animals, indoor, person
+  save_dir: "./dpt-head-trainer/checkpoints" # Directory to save model weights
