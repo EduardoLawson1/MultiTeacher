@@ -2,7 +2,7 @@
 
 # --- Dataset Configuration ---
 dataset:
-  name: "pascal_voc"
+  name: "pascal"
   root_dir: "/home/pdi5060ti/Documentos/MultiTeacher/dpt-head-trainer/data/VOC" # Update with your PASCAL VOC path
   train_list: "splits/train.txt"
   val_list: "splits/val.txt"
