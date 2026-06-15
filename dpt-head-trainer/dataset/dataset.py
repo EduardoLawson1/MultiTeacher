@@ -13,11 +13,12 @@ from torchvision import transforms
 
 
 class SemiDataset(Dataset):
-    def __init__(self, name, root, size=None, split='train'):
+    def __init__(self, name, root, size=504, split='train', class_mapping=None):
         self.name = name
         self.root = root
         self.size = size
         self.split = split
+        self.class_mapping = class_mapping
 
         # Loading splits path
         id_path = os.path.join(root, 'splits', f'{split}.txt')
@@ -63,6 +64,14 @@ class SemiDataset(Dataset):
             img, mask = normalize(img, mask)
             img = torch.from_numpy(np.array(img)).float()
             mask = torch.from_numpy(np.array(mask)).long()
+            
+            # Aplicar mapeamento de classes se fornecido
+            if self.class_mapping is not None:
+                mask_mapped = torch.zeros_like(mask)
+                for orig_class, new_class in self.class_mapping.items():
+                    mask_mapped[mask == orig_class] = new_class
+                mask = mask_mapped
+            
             return img, mask
         
         img, mask = resize(img, mask, (0.5, 2.0))
@@ -75,6 +84,13 @@ class SemiDataset(Dataset):
         img = normalize(img)
         
         mask = torch.from_numpy(np.array(mask)).long()
+        
+        # Aplicar mapeamento de classes se fornecido
+        if self.class_mapping is not None:
+            mask_mapped = torch.zeros_like(mask)
+            for orig_class, new_class in self.class_mapping.items():
+                mask_mapped[mask == orig_class] = new_class
+            mask = mask_mapped
         
         # Criar ignore_mask como tensor
         ignore_mask = torch.zeros_like(mask)
