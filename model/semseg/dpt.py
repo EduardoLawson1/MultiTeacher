@@ -117,6 +117,7 @@ class DPT(nn.Module):
         features=128, 
         out_channels=[96, 192, 384, 768], 
         use_bn=False,
+        group_nclass=None, # NOVO ex.[3, 3, 2, 3] -> 4 grupos
     ):
         super(DPT, self).__init__()
         
@@ -130,22 +131,43 @@ class DPT(nn.Module):
         self.encoder_size = encoder_size
         self.backbone = DINOv2(model_name=encoder_size)
         
+        # Head única do aluno (comportamento original, intacto)
         self.head = DPTHead(nclass, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
         
+        # NOVO - Múltiplas heads do professor (buscando usar um por grupo de classes)
+        self.group_nclass = group_nclass
+        if group_nclass is not None:
+            self.heads_multi = nn.ModuleList([
+                DPTHead(n, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
+                for n in group_nclass
+            ])
+        else:
+            self.heads_multi = None
+
+
         self.binomial = torch.distributions.binomial.Binomial(probs=0.5)
         
     def lock_backbone(self):
         for p in self.backbone.parameters():
             p.requires_grad = False
     
-    def forward(self, x, comp_drop=False):
+    def forward(self, x, comp_drop=False, multi_head=False):
         patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
         
         features = self.backbone.get_intermediate_layers(
             x, self.intermediate_layer_idx[self.encoder_size]
         )
         
-        if comp_drop:
+        if multi_head:
+            outs = []
+            for head in self.heads_multi:
+                out = self.head(features, patch_h, patch_w)
+                out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
+                outs.append(out)
+            return outs  # lista de 4 tensores [B, group_nclass[i], H, W]
+
+
+        if comp_drop:  #checar alterações aq dentro
             bs, dim = features[0].shape[0], features[0].shape[-1]
             
             dropout_mask1 = self.binomial.sample((bs // 2, dim)).cuda() * 2.0

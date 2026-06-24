@@ -58,5 +58,5 @@ class_groups:
 # --- Experiment Configuration ---
 # This section specifies which group to use for the current training run
 experiment:
-  group_to_train: "vehicles" # Options: vehicles, animals, indoor, person
+  group_to_train: "person" # Options: vehicles, animals, indoor, person
   save_dir: "./dpt-head-trainer/checkpoints" # Directory to save model weights
