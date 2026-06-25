@@ -161,7 +161,7 @@ class DPT(nn.Module):
         if multi_head:
             outs = []
             for head in self.heads_multi:
-                out = self.head(features, patch_h, patch_w)
+                out = head(features, patch_h, patch_w)
                 out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
                 outs.append(out)
             return outs  # lista de 4 tensores [B, group_nclass[i], H, W]
