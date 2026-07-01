@@ -159,6 +159,9 @@ class DPT(nn.Module):
         )
         
         if multi_head:
+            if self.heads_multi is None:
+                raise RuntimeError("Multihead = True, but no group_nclass informed")
+                
             outs = []
             for head in self.heads_multi:
                 out = head(features, patch_h, patch_w)
