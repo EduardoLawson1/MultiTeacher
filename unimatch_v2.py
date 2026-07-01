@@ -57,10 +57,15 @@ def main():
         'large': {'encoder_size': 'large', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
         'giant': {'encoder_size': 'giant', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
     }
-    model = DPT(**{**model_configs[cfg['backbone'].split('_')[-1]], 'nclass': cfg['nclass']})
+    
+    #NOVO: quebra galho momentâneo para passar grupos de classe ##NEEDFIX
+    group_nclass = [7, 6, 6, 1]
+
+    model = DPT(**{**model_configs[cfg['backbone'].split('_')[-1]], 'nclass': cfg['nclass'], 'group_nclass': group_nclass})
     state_dict = torch.load(f'./pretrained/{cfg["backbone"]}.pth')
     model.backbone.load_state_dict(state_dict)
-        
+    print(f"\n\n\n\n {model} \n\n\n\n")
+
     if cfg['lock_backbone']:
         model.lock_backbone()
     
