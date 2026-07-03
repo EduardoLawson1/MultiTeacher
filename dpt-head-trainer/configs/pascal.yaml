@@ -54,6 +54,8 @@ class_groups:
     - tv/monitor
   person:
     - person
+  background:
+    - background
 
 # --- Experiment Configuration ---
 # This section specifies which group to use for the current training run
