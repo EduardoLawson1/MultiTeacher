@@ -117,7 +117,7 @@ class DPT(nn.Module):
         features=128, 
         out_channels=[96, 192, 384, 768], 
         use_bn=False,
-        group_nclass=None, # NOVO ex.[3, 3, 2, 3] -> 4 grupos
+        group_nclass=None,
     ):
         super(DPT, self).__init__()
         
@@ -130,20 +130,15 @@ class DPT(nn.Module):
         
         self.encoder_size = encoder_size
         self.backbone = DINOv2(model_name=encoder_size)
-        
-        # Head única do aluno (comportamento original, intacto)
-        self.head = DPTHead(nclass, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
-        
-        # NOVO - Múltiplas heads do professor (buscando usar um por grupo de classes)
-        self.group_nclass = group_nclass
-        if group_nclass is not None:
-            self.heads_multi = nn.ModuleList([
-                DPTHead(n, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
-                for n in group_nclass
-            ])
-        else:
-            self.heads_multi = None
 
+        if group_nclass is None:
+            raise ValueError("group_nclass é obrigatório. Ex: [7, 6, 6, 1, 1]")
+
+        self.group_nclass = group_nclass
+        self.heads_multi = nn.ModuleList([
+            DPTHead(n, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
+            for n in group_nclass
+        ])
 
         self.binomial = torch.distributions.binomial.Binomial(probs=0.5)
         
@@ -151,28 +146,15 @@ class DPT(nn.Module):
         for p in self.backbone.parameters():
             p.requires_grad = False
     
-    def forward(self, x, comp_drop=False, multi_head=False):
+    def forward(self, x, comp_drop=False):
         patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
         
         features = self.backbone.get_intermediate_layers(
             x, self.intermediate_layer_idx[self.encoder_size]
         )
-        
-        if multi_head:
-            if self.heads_multi is None:
-                raise RuntimeError("Multihead = True, but no group_nclass informed")
-                
-            outs = []
-            for head in self.heads_multi:
-                out = head(features, patch_h, patch_w)
-                out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
-                outs.append(out)
-            return outs  # lista de 4 tensores [B, group_nclass[i], H, W]
 
-
-        if comp_drop:  #checar alterações aq dentro
+        if comp_drop:
             bs, dim = features[0].shape[0], features[0].shape[-1]
-            
             dropout_mask1 = self.binomial.sample((bs // 2, dim)).cuda() * 2.0
             dropout_mask2 = 2.0 - dropout_mask1
             dropout_prob = 0.5
@@ -180,18 +162,13 @@ class DPT(nn.Module):
             kept_indexes = torch.randperm(bs // 2)[:num_kept]
             dropout_mask1[kept_indexes, :] = 1.0
             dropout_mask2[kept_indexes, :] = 1.0
-            
             dropout_mask = torch.cat((dropout_mask1, dropout_mask2))
-            
-            features = (feature * dropout_mask.unsqueeze(1) for feature in features)
-            
-            out = self.head(features, patch_h, patch_w)
-            
+            features = tuple(feature * dropout_mask.unsqueeze(1) for feature in features)
+
+        outs = []
+        for head in self.heads_multi:
+            out = head(features, patch_h, patch_w)
             out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
-            
-            return out
-        
-        out = self.head(features, patch_h, patch_w)
-        out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
-        
-        return out
+            outs.append(out)
+
+        return outs  # lista de tensores [B, group_nclass[i], H, W]
