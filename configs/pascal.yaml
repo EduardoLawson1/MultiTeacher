@@ -6,7 +6,7 @@ crop_size: 518
 
 # arguments for training
 epochs: 60
-batch_size: 4 # per GPU x 4 GPUs
+batch_size: 4  # per GPU x 4 GPUs
 lr: 0.000005
 lr_multi: 40.0
 criterion:
@@ -19,3 +19,40 @@ conf_thresh: 0.95
 model: dpt
 backbone: dinov2_small
 lock_backbone: False
+
+# arguments for multi-head / class groups
+class_groups:
+  background:
+    - background
+  vehicles:
+    - aeroplane
+    - bicycle
+    - boat
+    - bus
+    - car
+    - motorbike
+    - train
+  animals:
+    - bird
+    - cat
+    - cow
+    - dog
+    - horse
+    - sheep
+  indoor:
+    - bottle
+    - chair
+    - dining table
+    - potted plant
+    - sofa
+    - tv/monitor
+  person:
+    - person
+
+# caminhos para os pesos de cada head (mesma ordem de class_groups)
+group_head_paths:
+  - ./pretrained/head_background.pth
+  - ./pretrained/head_vehicles.pth
+  - ./pretrained/head_animals.pth
+  - ./pretrained/head_indoor.pth
+  - ./pretrained/head_person.pth
