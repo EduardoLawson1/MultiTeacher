@@ -30,6 +30,8 @@ model:
 # The trainer will use one of these groups at a time.
 # The class names must match the 'pascal' list in util/classes.py
 class_groups:
+  background:
+    - background
   vehicles:
     - aeroplane
     - bicycle
@@ -54,8 +56,6 @@ class_groups:
     - tv/monitor
   person:
     - person
-  background:
-    - background
 
 # --- Experiment Configuration ---
 # This section specifies which group to use for the current training run
