@@ -117,7 +117,7 @@ class DPT(nn.Module):
         features=128, 
         out_channels=[96, 192, 384, 768], 
         use_bn=False,
-        group_nclass=None,
+        group_nclass=None,  # ex: [1, 7, 6, 6, 1] -> 5 grupos
     ):
         super(DPT, self).__init__()
         
@@ -131,14 +131,19 @@ class DPT(nn.Module):
         self.encoder_size = encoder_size
         self.backbone = DINOv2(model_name=encoder_size)
 
-        if group_nclass is None:
-            raise ValueError("group_nclass é obrigatório. Ex: [7, 6, 6, 1, 1]")
-
         self.group_nclass = group_nclass
-        self.heads_multi = nn.ModuleList([
-            DPTHead(n, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
-            for n in group_nclass
-        ])
+
+        if group_nclass is not None:
+            # Modo multi-head: usado no unimatch_v2.py (professor + aluno)
+            self.heads_multi = nn.ModuleList([
+                DPTHead(n, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
+                for n in group_nclass
+            ])
+            self.head = None  # não usado no modo multi-head
+        else:
+            # Modo head única: usado no head_training.py (treino supervisionado isolado)
+            self.head = DPTHead(nclass, self.backbone.embed_dim, features, use_bn, out_channels=out_channels)
+            self.heads_multi = None
 
         self.binomial = torch.distributions.binomial.Binomial(probs=0.5)
         
@@ -163,12 +168,19 @@ class DPT(nn.Module):
             dropout_mask1[kept_indexes, :] = 1.0
             dropout_mask2[kept_indexes, :] = 1.0
             dropout_mask = torch.cat((dropout_mask1, dropout_mask2))
+            # tuple garante que features pode ser iterado múltiplas vezes (uma por head)
             features = tuple(feature * dropout_mask.unsqueeze(1) for feature in features)
 
-        outs = []
-        for head in self.heads_multi:
-            out = head(features, patch_h, patch_w)
-            out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
-            outs.append(out)
+        # Modo multi-head (unimatch_v2.py)
+        if self.heads_multi is not None:
+            outs = []
+            for head in self.heads_multi:
+                out = head(features, patch_h, patch_w)
+                out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
+                outs.append(out)
+            return outs  # lista de tensores [B, group_nclass[i], H, W]
 
-        return outs  # lista de tensores [B, group_nclass[i], H, W]
+        # Modo head única (head_training.py)
+        out = self.head(features, patch_h, patch_w)
+        out = F.interpolate(out, (patch_h * 14, patch_w * 14), mode='bilinear', align_corners=True)
+        return out  # tensor [B, nclass, H, W]
