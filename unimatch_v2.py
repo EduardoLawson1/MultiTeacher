@@ -268,7 +268,8 @@ def main():
             iters = epoch * len(trainloader_u) + i
             lr = cfg['lr'] * (1 - iters / total_iters) ** 0.9
             optimizer.param_groups[0]["lr"] = lr
-            optimizer.param_groups[1]["lr"] = lr * cfg['lr_multi']
+            # optimizer.param_groups[1]["lr"] = lr * cfg['lr_multi']
+            optimizer.param_groups[1]["lr"] = lr
 
             ema_ratio = min(1 - 1 / (iters + 1), 0.996)
             for param, param_ema in zip(model.parameters(), model_ema.parameters()):
