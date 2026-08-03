@@ -76,10 +76,20 @@ def evaluate(model, loader, mode, cfg, multiplier=None):
                     img = F.interpolate(img, (new_h, new_w), mode='bilinear', align_corners=True)
                 
                 pred = model(img)
-            
+
+                # se o modelo retornar lista (modo multi-head), funde em tensor único
+                if isinstance(pred, list):
+                    from util.fusion import fuse_predictions, build_group_to_global
+                    from util.classes import CLASSES
+                    group_to_global = build_group_to_global(
+                        cfg['class_groups'], CLASSES[cfg['dataset']], 
+                        include_background=cfg.get('heads_include_background', False)
+                    )
+                    pred = fuse_predictions(pred, group_to_global, cfg['nclass'])
+
                 if multiplier is not None:
                     pred = F.interpolate(pred, (ori_h, ori_w), mode='bilinear', align_corners=True)
-            
+                            
             pred = pred.argmax(dim=1)
 
             intersection, union, target = \

@@ -1,29 +1,28 @@
 # arguments for dataset
 dataset: pascal
-data_root: Your/PASCAL/Path
+data_root: dpt-head-trainer/data/VOC
 nclass: 21
 crop_size: 518
 
 # arguments for training
 epochs: 60
-batch_size: 4  # per GPU x 4 GPUs
+batch_size: 2  # per GPU x 4 GPUs
 lr: 0.000005
 lr_multi: 40.0
 criterion:
   name: CELoss
   kwargs:
     ignore_index: 255
-conf_thresh: 0.95
+conf_thresh: 0.75
 
 # arguments for model
 model: dpt
 backbone: dinov2_small
 lock_backbone: False
+heads_include_background: true
 
 # arguments for multi-head / class groups
 class_groups:
-  background:
-    - background
   vehicles:
     - aeroplane
     - bicycle
@@ -46,13 +45,8 @@ class_groups:
     - potted plant
     - sofa
     - tv/monitor
-  person:
-    - person
 
-# caminhos para os pesos de cada head (mesma ordem de class_groups)
 group_head_paths:
-  - ./pretrained/head_background.pth
-  - ./pretrained/head_vehicles.pth
-  - ./pretrained/head_animals.pth
-  - ./pretrained/head_indoor.pth
-  - ./pretrained/head_person.pth
+  vehicles: dpt-head-trainer/training-logs/vehicles/best_head.pth
+  animals:  dpt-head-trainer/training-logs/animals/best_head.pth
+  indoor:   dpt-head-trainer/training-logs/indoor/best_head.pth

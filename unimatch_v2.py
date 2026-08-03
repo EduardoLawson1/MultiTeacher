@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import yaml
 
 from dataset.semi import SemiDataset
-from model.semseg.dpt import DPT
+from model.semseg.dpt_multihead import DPT
 from supervised import evaluate
 from util.classes import CLASSES
 from util.fusion import build_group_to_global, fuse_predictions, fuse_teacher_predictions
@@ -53,10 +53,22 @@ def main():
     cudnn.benchmark = True
 
     # ------------------------------------------------------------------
-    # Constrói group_to_global a partir do yaml (uma vez, antes do modelo)
+    # group_nclass e group_to_global derivados do yaml
+    # heads_include_background=True: cada head foi treinada com background
+    # como classe 0 adicional, então tamanho real = len(grupo) + 1
     # ------------------------------------------------------------------
-    group_to_global = build_group_to_global(cfg['class_groups'], CLASSES[cfg['dataset']])
-    group_nclass = [len(g) for g in cfg['class_groups'].values()]
+    include_bg = cfg.get('heads_include_background', False)
+
+    group_nclass = [
+        len(g) + 1 if include_bg else len(g)
+        for g in cfg['class_groups'].values()
+    ]
+
+    group_to_global = build_group_to_global(
+        cfg['class_groups'],
+        CLASSES[cfg['dataset']],
+        include_background=include_bg,
+    )
 
     model_configs = {
         'small': {'encoder_size': 'small', 'features': 64,  'out_channels': [48, 96, 192, 384]},
@@ -76,11 +88,16 @@ def main():
     model.backbone.load_state_dict(state_dict)
 
     # Carrega pesos especializados de cada head
-    for i, path in enumerate(cfg['group_head_paths']):
+    # for i, path in enumerate(cfg['group_head_paths']):
+    #     state_dict_head = torch.load(path, map_location='cpu')
+    #     model.heads_multi[i].load_state_dict(state_dict_head)
+    #     if rank == 0:
+    #         logger.info(f'Loaded head [{i}] from {path}')
+    for i, (group_name, path) in enumerate(cfg['group_head_paths'].items()):
         state_dict_head = torch.load(path, map_location='cpu')
         model.heads_multi[i].load_state_dict(state_dict_head)
         if rank == 0:
-            logger.info(f'Loaded head [{i}] from {path}')
+            logger.info(f'Loaded head [{i}] ({group_name}) from {path}')
 
     if cfg['lock_backbone']:
         model.lock_backbone()
@@ -159,6 +176,9 @@ def main():
         if rank == 0:
             logger.info('===========> Epoch: {:}, Previous best: {:.2f} @epoch-{:}, '
                         'EMA: {:.2f} @epoch-{:}'.format(epoch, previous_best, best_epoch, previous_best_ema, best_epoch_ema))
+            # logger.info(f"group_nclass: {group_nclass}")
+            # for i, g in enumerate(group_to_global):
+            #     logger.info(f"group_to_global[{i}]: {g.tolist()} (len={len(g)})")
 
         total_loss       = AverageMeter()
         total_loss_x     = AverageMeter()
@@ -179,9 +199,7 @@ def main():
             img_u_w,  img_u_s1, img_u_s2 = img_u_w.cuda(), img_u_s1.cuda(), img_u_s2.cuda()
             ignore_mask, cutmix_box1, cutmix_box2 = ignore_mask.cuda(), cutmix_box1.cuda(), cutmix_box2.cuda()
 
-            # ------------------------------------------------------------------
             # Professor: gera pseudo-rótulos com fusão multi-head + threshold
-            # ------------------------------------------------------------------
             with torch.no_grad():
                 outs_u_w = model_ema(img_u_w)
                 mask_u_w, conf_u_w = fuse_teacher_predictions(
@@ -189,43 +207,40 @@ def main():
                     conf_thresh=cfg['conf_thresh'],
                 )
 
-            # CutMix nas imagens fortes (igual ao original)
+            # CutMix nas imagens fortes
             img_u_s1[cutmix_box1.unsqueeze(1).expand(img_u_s1.shape) == 1] = \
                 img_u_s1.flip(0)[cutmix_box1.unsqueeze(1).expand(img_u_s1.shape) == 1]
             img_u_s2[cutmix_box2.unsqueeze(1).expand(img_u_s2.shape) == 1] = \
                 img_u_s2.flip(0)[cutmix_box2.unsqueeze(1).expand(img_u_s2.shape) == 1]
 
-            # ------------------------------------------------------------------
-            # Aluno: forward nas imagens rotuladas
-            # ------------------------------------------------------------------
+            # Aluno: imagens rotuladas
             outs_x = model(img_x)
             pred_x = fuse_predictions(outs_x, group_to_global, cfg['nclass'])
 
-            # ------------------------------------------------------------------
-            # Aluno: forward nas imagens não-rotuladas (com comp_drop)
+            # Aluno: imagens não-rotuladas com comp_drop
             # .chunk(2) não funciona com lista — dividimos por fatiamento
-            # ------------------------------------------------------------------
-            outs_u_s = model(torch.cat((img_u_s1, img_u_s2)), comp_drop=True)
+            outs_u_s  = model(torch.cat((img_u_s1, img_u_s2)), comp_drop=True)
             outs_u_s1 = [o[:o.shape[0] // 2] for o in outs_u_s]
             outs_u_s2 = [o[o.shape[0] // 2:] for o in outs_u_s]
             pred_u_s1 = fuse_predictions(outs_u_s1, group_to_global, cfg['nclass'])
             pred_u_s2 = fuse_predictions(outs_u_s2, group_to_global, cfg['nclass'])
 
-            # CutMix nos pseudo-rótulos (igual ao original)
+            # CutMix nos pseudo-rótulos
             mask_u_w_cutmixed1,  conf_u_w_cutmixed1,  ignore_mask_cutmixed1  = mask_u_w.clone(), conf_u_w.clone(), ignore_mask.clone()
             mask_u_w_cutmixed2,  conf_u_w_cutmixed2,  ignore_mask_cutmixed2  = mask_u_w.clone(), conf_u_w.clone(), ignore_mask.clone()
 
-            mask_u_w_cutmixed1[cutmix_box1 == 1]  = mask_u_w.flip(0)[cutmix_box1 == 1]
-            conf_u_w_cutmixed1[cutmix_box1 == 1]  = conf_u_w.flip(0)[cutmix_box1 == 1]
+            mask_u_w_cutmixed1[cutmix_box1 == 1]   = mask_u_w.flip(0)[cutmix_box1 == 1]
+            conf_u_w_cutmixed1[cutmix_box1 == 1]   = conf_u_w.flip(0)[cutmix_box1 == 1]
             ignore_mask_cutmixed1[cutmix_box1 == 1] = ignore_mask.flip(0)[cutmix_box1 == 1]
 
-            mask_u_w_cutmixed2[cutmix_box2 == 1]  = mask_u_w.flip(0)[cutmix_box2 == 1]
-            conf_u_w_cutmixed2[cutmix_box2 == 1]  = conf_u_w.flip(0)[cutmix_box2 == 1]
+            mask_u_w_cutmixed2[cutmix_box2 == 1]   = mask_u_w.flip(0)[cutmix_box2 == 1]
+            conf_u_w_cutmixed2[cutmix_box2 == 1]   = conf_u_w.flip(0)[cutmix_box2 == 1]
             ignore_mask_cutmixed2[cutmix_box2 == 1] = ignore_mask.flip(0)[cutmix_box2 == 1]
 
-            # ------------------------------------------------------------------
-            # Losses (iguais ao original — pred_x/pred_u_s1/s2 já são [B,21,H,W])
-            # ------------------------------------------------------------------
+            # Teste de consistência do Shape
+            assert pred_u_s1.shape == (img_u_s1.shape[0], cfg['nclass'], img_u_s1.shape[2], img_u_s1.shape[3])
+            # Adicionei esse debug para caso batch de u_s1 != batch u_s2
+            # Losses
             loss_x = criterion_l(pred_x, mask_x)
 
             loss_u_s1 = criterion_u(pred_u_s1, mask_u_w_cutmixed1)
@@ -243,7 +258,6 @@ def main():
             loss.backward()
             optimizer.step()
 
-            # Métricas
             total_loss.update(loss.item())
             total_loss_x.update(loss_x.item())
             total_loss_s.update(loss_u_s.item())
@@ -251,13 +265,11 @@ def main():
                          (ignore_mask != 255).sum()
             total_mask_ratio.update(mask_ratio.item())
 
-            # LR schedule
             iters = epoch * len(trainloader_u) + i
             lr = cfg['lr'] * (1 - iters / total_iters) ** 0.9
             optimizer.param_groups[0]["lr"] = lr
             optimizer.param_groups[1]["lr"] = lr * cfg['lr_multi']
 
-            # EMA update (mean teacher — inalterado)
             ema_ratio = min(1 - 1 / (iters + 1), 0.996)
             for param, param_ema in zip(model.parameters(), model_ema.parameters()):
                 param_ema.copy_(param_ema * ema_ratio + param.detach() * (1 - ema_ratio))
@@ -265,10 +277,10 @@ def main():
                 buffer_ema.copy_(buffer_ema * ema_ratio + buffer.detach() * (1 - ema_ratio))
 
             if rank == 0:
-                writer.add_scalar('train/loss_all',   loss.item(),       iters)
-                writer.add_scalar('train/loss_x',     loss_x.item(),     iters)
-                writer.add_scalar('train/loss_s',     loss_u_s.item(),   iters)
-                writer.add_scalar('train/mask_ratio', mask_ratio,        iters)
+                writer.add_scalar('train/loss_all',   loss.item(),     iters)
+                writer.add_scalar('train/loss_x',     loss_x.item(),   iters)
+                writer.add_scalar('train/loss_s',     loss_u_s.item(), iters)
+                writer.add_scalar('train/mask_ratio', mask_ratio,      iters)
 
             if (i % (len(trainloader_u) // 8) == 0) and (rank == 0):
                 logger.info('Iters: {:}, LR: {:.7f}, Total loss: {:.3f}, Loss x: {:.3f}, '
@@ -277,11 +289,8 @@ def main():
                                 total_loss.avg, total_loss_x.avg,
                                 total_loss_s.avg, total_mask_ratio.avg))
 
-        # ------------------------------------------------------------------
-        # Avaliação
-        # ------------------------------------------------------------------
         eval_mode = 'sliding_window' if cfg['dataset'] == 'cityscapes' else 'original'
-        mIoU,     iou_class     = evaluate(model,     valloader, eval_mode, cfg, multiplier=14)
+        mIoU, iou_class = evaluate(model, valloader, eval_mode, cfg, multiplier=14)
         mIoU_ema, iou_class_ema = evaluate(model_ema, valloader, eval_mode, cfg, multiplier=14)
 
         if rank == 0:
@@ -306,14 +315,14 @@ def main():
 
         if rank == 0:
             checkpoint = {
-                'model':              model.state_dict(),
-                'model_ema':          model_ema.state_dict(),
-                'optimizer':          optimizer.state_dict(),
-                'epoch':              epoch,
-                'previous_best':      previous_best,
-                'previous_best_ema':  previous_best_ema,
-                'best_epoch':         best_epoch,
-                'best_epoch_ema':     best_epoch_ema,
+                'model':             model.state_dict(),
+                'model_ema':         model_ema.state_dict(),
+                'optimizer':         optimizer.state_dict(),
+                'epoch':             epoch,
+                'previous_best':     previous_best,
+                'previous_best_ema': previous_best_ema,
+                'best_epoch':        best_epoch,
+                'best_epoch_ema':    best_epoch_ema,
             }
             torch.save(checkpoint, os.path.join(args.save_path, 'latest.pth'))
             if is_best:

@@ -21,8 +21,8 @@ train:
 
 # --- Model Configuration ---
 model:
-  encoder_size: "base" # DINOv2 backbone size
-  features: 256
+  encoder_size: "small" # DINOv2 backbone size
+  features: 64
   out_channels: [256, 512, 1024, 1024] # Should match DPTHead defaults for 'base'
   use_bn: False
 
@@ -60,5 +60,5 @@ class_groups:
 # --- Experiment Configuration ---
 # This section specifies which group to use for the current training run
 experiment:
-  group_to_train: "person" # Options: vehicles, animals, indoor, person
+  group_to_train: "background" # Options: background, vehicles, animals, indoor, person
   save_dir: "./dpt-head-trainer/checkpoints" # Directory to save model weights
