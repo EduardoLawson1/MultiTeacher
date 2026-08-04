@@ -271,7 +271,8 @@ def main():
             # optimizer.param_groups[1]["lr"] = lr * cfg['lr_multi']
             optimizer.param_groups[1]["lr"] = lr
 
-            ema_ratio = min(1 - 1 / (iters + 1), 0.996)
+            # ema_ratio = min(1 - 1 / (iters + 1), 0.996) # debugging: Maybe the student is bringing the already trained teacher to UNlearn :(
+            ema_ratio = max(min(1 - 1 / (iters + 1), 0.996), 0.99)
             for param, param_ema in zip(model.parameters(), model_ema.parameters()):
                 param_ema.copy_(param_ema * ema_ratio + param.detach() * (1 - ema_ratio))
             for buffer, buffer_ema in zip(model.buffers(), model_ema.buffers()):
